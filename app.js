@@ -11,7 +11,7 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 1, .01, 100);
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-let pixelRatio = Math.min(devicePixelRatio, 1.5); renderer.setPixelRatio(pixelRatio);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); // full retina sharpness
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false; // the pod is static, so shadows are baked once after load
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
@@ -270,14 +270,6 @@ renderer.setAnimationLoop(now => {
   }
   const moved = controls.update();
   // Draw only when something changed; a still pod costs nothing.
-  if (moved || tween || fade || selected || needsRender) { renderer.render(scene, camera); needsRender = false; watchFrame(now); }
-  else lastFrame = 0;
+  if (moved || tween || fade || selected || needsRender) { renderer.render(scene, camera); needsRender = false; }
 });
-// If frames run slow, drop to 1× pixel ratio once; most of the cost is per-pixel shading.
-let lastFrame = 0, slow = 0;
-function watchFrame(now) {
-  if (lastFrame && pixelRatio > 1) { slow = now - lastFrame > 24 ? slow + 1 : Math.max(0, slow - 1);
-    if (slow > 20) { pixelRatio = 1; renderer.setPixelRatio(1); resize(); } }
-  lastFrame = now;
-}
 window.__studio = { scene, camera, controls, renderer, select, goTo, setLighting: l => { lighting = l; applyLighting(); }, setAmbient: a => { ambient = a; $('#ambient').checked = a; applyLighting(); } };
