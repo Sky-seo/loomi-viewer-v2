@@ -72,7 +72,7 @@ function scan(path, size, strength, tint) { const d = tex(path, 1); d.wrapS = d.
 const T = {
   ochre: scan('tex/ochre_linen.jpg', [.2, .2], 3, '#c8c2b8'),
   grey: scan('tex/grey_linen.jpg', [.14, .14], 3, '#cfcfcf'),
-  peach: scan('tex/peach_weave.jpg', [.2, .185], 2.5, '#e6e2dc'),
+  remix: { d: tex('tex/remix_diffuse.jpg', 1), n: tex('tex/remix_normal.jpg'), r: tex('tex/remix_roughness.jpg'), size: [.3923, .4263], url: 'tex/remix_diffuse.jpg' },
   divina173: { d: tex('tex/divina173.jpg', 1), size: [.18, .254], url: 'tex/divina173.jpg' },
   maple, cork,
 };
@@ -124,7 +124,7 @@ const SPEC = [
     { key: 'DoorFrame', name: 'Door frame', fabric: 'Satin plastic', code: 'Pantone 406 C', color: '#cfc7bf', mat: satin('#cfc7bf'), view: 'door' },
   ] },
   { group: 'Interior', items: [
-    { key: 'Interior', name: 'Interior wall', fabric: 'Remix 3 (406)', code: '2968_C0406 · updated scan', sw: T.peach, mat: textile(T.peach, { normal: .8 }), view: 'door' },
+    { key: 'Interior', name: 'Interior wall', fabric: 'Remix 3 (406)', code: '2968_C0406 · 39.2 × 42.6 cm', sw: T.remix, mat: textile(T.remix, { normal: .8 }), view: 'door' },
     { key: 'SeatBack', name: 'Seat back', fabric: 'Divina MD (433)', code: 'Updated scan', sw: T.ochre, mat: textile(T.ochre, { normal: 1 }), view: 'seat' },
     { key: 'SeatCushion', name: 'Seat cushion', fabric: 'Apparel (0423)', code: '13006_C0423 · updated scan', sw: T.ochre, mat: textile(T.ochre, { normal: 1 }), view: 'seat' },
     { key: 'CushionInsert', name: 'Cushion insert', fabric: 'Divina (173)', code: 'Scan supplied · size est. 18 × 25 cm', sw: T.divina173, mat: textile(T.divina173), view: 'seat' },
@@ -221,7 +221,7 @@ const LIGHT = {
   night: { key: ['#9fb2d6', .18], hemi: .07, env: .07, exposure: 1.15, shadow: .04, interior: 1.7 },
 };
 let lighting = 'day', ambient = true;
-// Lighting changes blend over ~1 s: every light, the exposure and the stage colour ease from where they are to the new state.
+// Lighting changes blend over ~0.5 s: every light, the exposure and the stage colour ease from where they are to the new state.
 const stateNow = () => ({ keyColor: key.color.clone(), key: key.intensity, hemi: hemi.intensity, env: scene.environmentIntensity, exposure: renderer.toneMappingExposure,
   shadow: ground.material.opacity, ceil: ceil.intensity, glow: glow.intensity, mesh: meshMat.emissiveIntensity, bg: (scene.background || new THREE.Color()).clone() });
 let fade = null;
@@ -241,7 +241,7 @@ function setState(a, b, e) {
 function applyLighting(instant) {
   const to = targetState();
   if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { fade = null; setState(to, to, 1); }
-  else fade = { from: stateNow(), to, t0: performance.now(), dur: 1000 };
+  else fade = { from: stateNow(), to, t0: performance.now(), dur: 500 };
   document.querySelectorAll('[data-light]').forEach(b => b.setAttribute('aria-pressed', b.dataset.light === lighting));
   $('#ambient-state').textContent = ambient ? 'On' : 'Off';
 }
