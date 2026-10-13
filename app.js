@@ -129,21 +129,6 @@ const SPEC = [
 const ITEMS = SPEC.flatMap(g => g.items), BY_KEY = Object.fromEntries(ITEMS.map(i => [i.key, i]));
 ITEMS.forEach(i => { i.mat.name = `${i.name} · ${i.fabric}`; });
 
-// ---------- Spec sheet ----------
-const sheet = $('#sheet');
-for (const g of SPEC) {
-  const sec = document.createElement('section'); sec.className = 'group';
-  sec.innerHTML = `<h3>${g.group}</h3>`;
-  for (const i of g.items) {
-    const b = document.createElement('button'); b.className = 'part'; b.dataset.key = i.key; b.setAttribute('aria-pressed', 'false');
-    const sw = i.sw ? `url(${i.sw.url})` : i.color;
-    b.innerHTML = `<i class="sw" style="--sw:${sw}"></i><div><b>${i.name}</b><span>${i.fabric}</span><span class="code">${i.code}</span></div>`;
-    b.onclick = () => select(i.key);
-    sec.append(b);
-  }
-  sheet.append(sec);
-}
-
 // ---------- Model ----------
 const pod = new THREE.Group(); scene.add(pod);
 // The pod's own ambient lighting: the glowing ceiling mesh plus a warm wash on the backboard.
@@ -244,7 +229,6 @@ let selected = null, pulseStart = 0;
 function select(key) {
   if (selected) BY_KEY[selected].mat.emissive?.set(selected === 'Mesh' ? '#ffe2b0' : '#000000');
   selected = key && key !== selected ? key : null;
-  document.querySelectorAll('.part').forEach(b => b.setAttribute('aria-pressed', b.dataset.key === selected));
   needsRender = true;
   if (selected) { pulseStart = performance.now(); goTo(BY_KEY[selected].view); }
 }
@@ -252,9 +236,6 @@ function select(key) {
 function resize() { const w = viewport.clientWidth, h = viewport.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; fitFov(); needsRender = true; }
 new ResizeObserver(resize).observe(viewport); resize(); goTo('three', true);
 
-$('#guide-open').onclick = () => $('#guide').showModal();
-$('#guide-close').onclick = () => $('#guide').close();
-$('#guide').onclick = e => { if (e.target === $('#guide')) $('#guide').close(); };
 
 const ease = t => 1 - Math.pow(1 - t, 3);
 renderer.setAnimationLoop(now => {
