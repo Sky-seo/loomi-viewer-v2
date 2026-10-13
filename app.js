@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 
 // Loomi pod from LUM-9000-WIP-260930.STEP, finished per the Loomi Visualization Guide (10/02/2026).
 // The CAD carries no UVs, so textiles are projected triplanar in world space at their real swatch sizes.
@@ -12,7 +14,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 1, .01, 100);
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); // full retina sharpness
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap; // VSM blurs the baked shadow into a soft penumbra
 renderer.shadowMap.autoUpdate = false; // the pod is static, so shadows are baked once after load
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -25,20 +27,29 @@ scene.environment = pmrem.fromScene(room, .04).texture; scene.environmentIntensi
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = .07; controls.minDistance = .5; controls.maxDistance = 8;
 controls.maxPolarAngle = Math.PI * .52;
+// OrbitControls moves the camera inside its own input handlers, so any change it makes must schedule a frame.
+controls.addEventListener('change', () => { needsRender = true; });
+// Wheel and trackpad zoom glide to a target distance instead of jumping one step per wheel tick.
+// Caught on the viewport before it reaches the canvas; touch pinch still goes through OrbitControls.
+let zoomTo = null;
+viewport.addEventListener('wheel', e => {
+  e.preventDefault(); e.stopPropagation(); tween = null;
+  const dy = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1) * (e.ctrlKey ? 6 : 1); // ctrlKey: trackpad pinch
+  const d = zoomTo ?? camera.position.distanceTo(controls.target);
+  zoomTo = THREE.MathUtils.clamp(d * Math.exp(dy * .0012), controls.minDistance, controls.maxDistance); needsRender = true;
+}, { capture: true, passive: false });
 
 const key = new THREE.DirectionalLight('#fff8ee', 1.5); key.position.set(3, 6, 4.5); key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -2, right: 2, top: 2.5, bottom: -1 });
-key.shadow.normalBias = .03; key.shadow.bias = -.0005; key.shadow.radius = 4; scene.add(key);
+key.shadow.normalBias = .03; key.shadow.bias = -.0005; key.shadow.radius = 22; key.shadow.blurSamples = 32;
+key.shadow.intensity = .55; // shadows stay light and airy, as in the reference renders
+scene.add(key);
 const hemi = new THREE.HemisphereLight('#ffffff', '#e4e0d8', .7); scene.add(hemi);
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: .1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
-// Stage colour follows the page theme.
-let lightingReady = false;
-function applyTheme() { if (lightingReady) applyLighting(true); else scene.background = new THREE.Color(getComputedStyle($('.stage')).getPropertyValue('--stage').trim() || '#eeece8'); }
-applyTheme();
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
-new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+// The scene background matches the stage card (white by day, deep navy by night).
+scene.background = new THREE.Color(getComputedStyle($('.stage')).getPropertyValue('--stage').trim() || '#ffffff');
 
 // ---------- Materials ----------
 const loader = new THREE.TextureLoader(), aniso = renderer.capabilities.getMaxAnisotropy();
@@ -108,8 +119,8 @@ const SPEC = [
   { group: 'Shell', items: [
     { key: 'Exterior', name: 'Exterior wall', fabric: 'Divina Melange 3 (120), pleated', code: '1213_C0120 · updated scan', sw: T.grey, mat: textile(T.grey, { pleat: true, normal: 1, outward: true }), view: 'spec' },
     { key: 'Base', name: 'Base', fabric: 'Divina Melange 3 (120)', code: '1213_C0120', sw: T.grey, mat: textile(T.grey, { normal: 1, outward: true }), view: 'rear' },
-    { key: 'TopCap', name: 'Top cap', fabric: 'Satin plastic', code: 'Pantone 406 C', color: '#cfc7bf', mat: satin('#cfc7bf'), view: 'top' },
-    { key: 'Mesh', name: 'Mesh', fabric: 'White mesh', code: 'Ceiling, lit from above', color: '#f6efe2', mat: new THREE.MeshStandardMaterial({ color: '#f6efe2', roughness: .9, emissive: '#ffe2b0', emissiveIntensity: .35, side: THREE.DoubleSide }), view: 'top' },
+    { key: 'TopCap', name: 'Top cap', fabric: 'Satin plastic', code: 'Off-white, per reference render', color: '#e4e1db', mat: satin('#e4e1db'), view: 'top' },
+    { key: 'Mesh', name: 'Mesh', fabric: 'Cream mesh', code: 'Ceiling, lit from above', color: '#d4b48c', mat: new THREE.MeshStandardMaterial({ color: '#d4b48c', roughness: .9, emissive: '#f0c48c', emissiveIntensity: .35, side: THREE.DoubleSide }), view: 'top' },
     { key: 'DoorFrame', name: 'Door frame', fabric: 'Satin plastic', code: 'Pantone 406 C', color: '#cfc7bf', mat: satin('#cfc7bf'), view: 'door' },
   ] },
   { group: 'Interior', items: [
@@ -129,6 +140,40 @@ const SPEC = [
 const ITEMS = SPEC.flatMap(g => g.items), BY_KEY = Object.fromEntries(ITEMS.map(i => [i.key, i]));
 ITEMS.forEach(i => { i.mat.name = `${i.name} · ${i.fabric}`; });
 
+// ---------- Cutaway ----------
+// Zooming in past CUT_FAR starts slicing the pod's skin away on the camera's side, with a plane square to the line of sight
+// that slides in to the pod's centre by CUT_NEAR. Furniture, desk and screen are never cut, so the interior reads whole.
+renderer.localClippingEnabled = true;
+const CUT_KEYS = ['Exterior', 'Base', 'TopCap', 'Mesh', 'DoorFrame', 'Interior', 'SeatBack'], CUT_FAR = 2.4, CUT_NEAR = 1.35;
+const POD_CENTER = new THREE.Vector3(0, .72, 0), cutPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 1e6), toCam = new THREE.Vector3();
+function updateCut() {
+  toCam.subVectors(camera.position, POD_CENTER); const d = toCam.length(), k = THREE.MathUtils.smoothstep(d, CUT_NEAR, CUT_FAR);
+  // k: 0 = fully cut (near), 1 = untouched (far). Keep everything whose distance toward the camera is under the cut.
+  cutPlane.normal.copy(toCam).negate().normalize(); cutPlane.constant = (k < 1 ? 1.15 * k : 1e6) - cutPlane.normal.dot(POD_CENTER);
+}
+CUT_KEYS.forEach(k => { BY_KEY[k].mat.clippingPlanes = [cutPlane]; });
+
+// ---------- Ambient occlusion ----------
+// Soft contact darkening in corners, under the desk and seat, as in the reference renders. The frame is drawn to the screen
+// as before; a normal + depth pass that honours the cutaway feeds GTAO, and the denoised occlusion is multiplied over it.
+const aoBuffer = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthTexture: new THREE.DepthTexture(1, 1) });
+const gtao = new GTAOPass(scene, camera, 1, 1, { depthTexture: aoBuffer.depthTexture, normalTexture: aoBuffer.texture },
+  { radius: .12, distanceExponent: 2, thickness: .25, distanceFallOff: 1, scale: 1, samples: 32 }, { radius: 6, lumaPhi: 10, depthPhi: 2, normalPhi: 3 });
+gtao.output = GTAOPass.OUTPUT.Off; // compute only; the blend onto the screen happens in draw()
+const aoNormals = { cut: new THREE.MeshNormalMaterial({ side: THREE.DoubleSide, clippingPlanes: [cutPlane] }), whole: new THREE.MeshNormalMaterial({ side: THREE.DoubleSide }) };
+const AO_STRENGTH = .4, swapped = new Map();
+function draw() {
+  renderer.setRenderTarget(null); renderer.render(scene, camera);
+  // The floor is left out: its far edge would ring with occlusion, and the soft shadow already grounds the pod.
+  scene.traverse(o => { if (o.isMesh) { swapped.set(o, o.material); o.material = o === ground ? null : [].concat(o.material)[0].clippingPlanes?.length ? aoNormals.cut : aoNormals.whole; } });
+  const bg = scene.background; scene.background = null; ground.visible = false;
+  renderer.setRenderTarget(aoBuffer); renderer.setClearColor(0x7777ff, 1); renderer.clear(); renderer.render(scene, camera); renderer.setClearColor(0x000000, 1);
+  swapped.forEach((m, o) => { o.material = m; }); swapped.clear(); scene.background = bg; ground.visible = true;
+  gtao.render(renderer, null, null);
+  Object.assign(gtao.blendMaterial.uniforms, { intensity: { value: AO_STRENGTH }, tDiffuse: { value: gtao.pdRenderTarget.texture } });
+  gtao._renderPass(renderer, gtao.blendMaterial, null);
+}
+
 // ---------- Model ----------
 const pod = new THREE.Group(); scene.add(pod);
 // The pod's own ambient lighting: the glowing ceiling mesh plus a warm wash on the backboard.
@@ -138,11 +183,15 @@ let model = null;
 new GLTFLoader().load('assets/loomi.glb', g => {
   model = g.scene;
   pod.position.y = -new THREE.Box3().setFromObject(model).min.y;
+  // The loose cushion resting on the seat is left out, per the reference render: seat back and two base cushions only.
+  model.getObjectByName('SeatCushion')?.removeFromParent();
   model.traverse(o => {
     if (!o.isMesh) return;
     o.castShadow = o.receiveShadow = true;
     const swap = m => { const i = BY_KEY[m.name]; if (i) (meshesByKey[i.key] ||= new Set()).add(o); return i ? i.mat : m; };
     o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+    // The door jamb's exported normals streak its inner face, which the cutaway exposes; rebuild them, keeping edges over 30°.
+    if (o.name.startsWith('DoorFrame')) o.geometry = toCreasedNormals(o.geometry, Math.PI / 6);
   });
   pod.add(model);
   // Loomi display sits in the bezel opening, facing the seat (-x).
@@ -168,7 +217,9 @@ function screenTexture() {
 const VIEWS = {
   three: { pos: [2.3, 1.6, 3.6], target: [0, .72, 0] },
   straight: { pos: [0, .95, 4.3], target: [0, .72, 0] },
-  interior: { pos: [-.42, .86, 1.25], target: [.34, .62, -.02] },
+  // Interior: wide screens look in from the door side past the seat back; portrait screens face the display square on.
+  // Both were solved from the approved reference frames, so keep them unless the art direction changes.
+  interior: { pos: [-1.232, .6963, 1.0565], target: [.04, .649, -.0506], tall: { pos: [-.9751, .6068, .0443], target: [.3437, .5317, .0004] } },
   spec: { pos: [2.3, 1.6, 3.6], target: [0, .72, 0] },
   door: { pos: [-.42, .86, 1.25], target: [.34, .62, -.02] },
   display: { pos: [-.12, .9, .7], target: [.36, .68, 0] },
@@ -179,10 +230,10 @@ const VIEWS = {
 let tween = null, current = 'three', needsRender = true;
 function fitFov() { camera.fov = camera.aspect < .75 ? 50 : 30; camera.updateProjectionMatrix(); }
 function goTo(name, instant) {
-  current = name; const v = VIEWS[name];
+  current = name; zoomTo = null; const v = camera.aspect < .75 && VIEWS[name].tall || VIEWS[name];
   const from = { p: camera.position.clone(), t: controls.target.clone() }, to = { p: new THREE.Vector3(...v.pos), t: new THREE.Vector3(...v.target) };
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  tween = instant || reduce ? null : { from, to, t0: performance.now(), dur: 900 };
+  tween = instant || reduce ? null : { from, to, t0: performance.now(), dur: 1100 };
   if (!tween) { camera.position.copy(to.p); controls.target.copy(to.t); controls.update(); }
   document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === name));
 }
@@ -218,27 +269,43 @@ function applyLighting(instant) {
   if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { fade = null; setState(to, to, 1); }
   else fade = { from: stateNow(), to, t0: performance.now(), dur: 500 };
   document.querySelectorAll('[data-light]').forEach(b => b.setAttribute('aria-pressed', b.dataset.light === lighting));
-  $('#ambient-state').textContent = ambient ? 'On' : 'Off';
+  document.querySelectorAll('[data-ambient]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.ambient === 'on') === ambient));
 }
 document.querySelectorAll('[data-light]').forEach(b => b.onclick = () => { lighting = b.dataset.light; applyLighting(); });
-$('#ambient').onchange = e => { ambient = e.target.checked; applyLighting(); };
-lightingReady = true; applyLighting(true);
+document.querySelectorAll('[data-ambient]').forEach(b => b.onclick = () => { ambient = b.dataset.ambient === 'on'; applyLighting(); });
+// Left column picks a category; its options show in the right column.
+document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => document.querySelectorAll('[data-cat]').forEach(c => {
+  const on = c === b; c.setAttribute('aria-expanded', on); $('#' + c.getAttribute('aria-controls')).hidden = !on; }));
+applyLighting(true);
 
 const accent = new THREE.Color();
 let selected = null, pulseStart = 0;
 function select(key) {
-  if (selected) BY_KEY[selected].mat.emissive?.set(selected === 'Mesh' ? '#ffe2b0' : '#000000');
+  if (selected) BY_KEY[selected].mat.emissive?.set(selected === 'Mesh' ? '#f0c48c' : '#000000');
   selected = key && key !== selected ? key : null;
   needsRender = true;
   if (selected) { pulseStart = performance.now(); goTo(BY_KEY[selected].view); }
 }
 
-function resize() { const w = viewport.clientWidth, h = viewport.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; fitFov(); needsRender = true; }
+function resize() {
+  const w = viewport.clientWidth, h = viewport.clientHeight, wasTall = camera.aspect < .75;
+  renderer.setSize(w, h); camera.aspect = w / h; fitFov(); needsRender = true;
+  const pr = renderer.getPixelRatio(); aoBuffer.setSize(Math.ceil(w * pr), Math.ceil(h * pr)); gtao.setSize(Math.ceil(w * pr), Math.ceil(h * pr));
+  if (wasTall !== camera.aspect < .75 && VIEWS[current].tall && !tween) goTo(current, true);
+}
 new ResizeObserver(resize).observe(viewport); resize(); goTo('three', true);
 
 
-const ease = t => 1 - Math.pow(1 - t, 3);
+const ease = t => 1 - Math.pow(1 - t, 3), zoomOffset = new THREE.Vector3();
+let lastNow = performance.now();
 renderer.setAnimationLoop(now => {
+  const dt = Math.min(.05, (now - lastNow) / 1000); lastNow = now;
+  if (zoomTo !== null) {
+    zoomOffset.subVectors(camera.position, controls.target); const d = zoomOffset.length();
+    const nd = Math.abs(zoomTo - d) < 1e-4 ? zoomTo : d + (zoomTo - d) * (1 - Math.exp(-dt / .07));
+    camera.position.copy(controls.target).add(zoomOffset.setLength(nd)); needsRender = true;
+    if (nd === zoomTo) zoomTo = null;
+  }
   if (tween) {
     const k = Math.min(1, (now - tween.t0) / tween.dur), e = ease(k);
     camera.position.lerpVectors(tween.from.p, tween.to.p, e); controls.target.lerpVectors(tween.from.t, tween.to.t, e);
@@ -251,6 +318,6 @@ renderer.setAnimationLoop(now => {
   }
   const moved = controls.update();
   // Draw only when something changed; a still pod costs nothing.
-  if (moved || tween || fade || selected || needsRender) { renderer.render(scene, camera); needsRender = false; }
+  if (moved || tween || fade || selected || needsRender) { updateCut(); draw(); needsRender = false; }
 });
-window.__studio = { scene, camera, controls, renderer, select, goTo, setLighting: l => { lighting = l; applyLighting(); }, setAmbient: a => { ambient = a; $('#ambient').checked = a; applyLighting(); } };
+window.__studio = { scene, camera, controls, renderer, gtao, renderNow: () => { needsRender = true; }, select, goTo, setLighting: l => { lighting = l; applyLighting(); }, setAmbient: a => { ambient = a; applyLighting(); } };

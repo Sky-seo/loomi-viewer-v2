@@ -5,53 +5,52 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Loomi Spec Viewer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800;900&display=swap">
 <script type="importmap">{"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}</script>
 <style>
-/* Layout: one full-bleed stage — the pod with its camera and lighting tools floating over it. */
+/* Layout: a white rounded card on a pale sky page holds the pod. Categories sit in a column on the left;
+   the chosen category's options appear in a column on the right. */
 :root{
-  --bg:#e7e5e0; --stage:#eeece8; --panel:#f7f6f3; --ink:#23211d; --muted:#76716a; --line:#d9d5ce; --accent:#a8722f; --accent-soft:#a8722f1f;
-  --display:"Bricolage Grotesque","Hanken Grotesk",system-ui,sans-serif;
-  --body:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --page:#eef6fb; --stage:#ffffff; --navy:#121a4f; --pill:#eef5fb; --pill-hover:#e2eef8; --muted:#5d6488; --accent:#121a4f;
+  --font:"Nunito",system-ui,-apple-system,"Segoe UI",sans-serif;
 }
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1a18;--stage:#22211e;--panel:#262522;--ink:#ece8e1;--muted:#9c968c;--line:#3a3833;--accent:#d69b52;--accent-soft:#d69b5226;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#1b1a18;--stage:#22211e;--panel:#262522;--ink:#ece8e1;--muted:#9c968c;--line:#3a3833;--accent:#d69b52;--accent-soft:#d69b5226;color-scheme:dark}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font:400 14px/1.5 var(--body);-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--page);color:var(--navy);font:400 16px/1.4 var(--font);-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
-.app{height:100%;display:grid;grid-template-columns:minmax(0,1fr)}
-.stage{position:relative;background:var(--stage);color:var(--ink);transition:background-color .5s ease,color .5s ease;min-height:0;overflow:hidden}
+:focus-visible{outline:3px solid #7cc0f0;outline-offset:3px}
+.app{height:100%;padding:16px}
+.stage{position:relative;height:100%;background:var(--stage);border-radius:40px;overflow:hidden;transition:background-color .5s ease}
+/* Nighttime darkens the card itself. */
+.stage.night{--stage:#10142e}
 #viewport{position:absolute;inset:0;touch-action:none}
 #viewport canvas{display:block;width:100%;height:100%}
-.mast{position:absolute;left:24px;top:22px;right:24px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;pointer-events:none}
-.mast h1{margin:0;font:650 clamp(26px,3vw,40px)/1 var(--display);letter-spacing:-.02em;text-wrap:balance}
-.mast p{margin:8px 0 0;color:var(--muted);max-width:34ch}
-.code{font:500 11px/1 var(--mono);letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
-.mast .code{padding-top:6px;text-align:right;line-height:1.6}
-.tools{position:absolute;left:24px;bottom:22px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;max-width:calc(100% - 48px)}
-.seg,.toggle{transition:background-color .5s ease,border-color .5s ease,color .5s ease;display:flex;align-items:center;gap:2px;padding:4px;border-radius:999px;background:var(--panel);border:1px solid var(--line)}
-.seg .code,.toggle .code{padding:0 8px 0 8px;font-size:10px}
-.seg button{padding:6px 12px;border-radius:999px;font-size:13px}
-.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
-.toggle{gap:8px;padding-right:12px;cursor:pointer;font-size:13px}
-.toggle input{position:absolute;opacity:0;width:1px;height:1px}
-.toggle i{width:30px;height:18px;border-radius:999px;background:var(--line);position:relative;transition:background .2s}
-.toggle i::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--panel);box-shadow:0 1px 2px #0003;transition:transform .2s}
-.toggle input:checked+i{background:var(--accent)}
-.toggle input:checked+i::after{transform:translateX(12px)}
-.toggle input:focus-visible+i{outline:2px solid var(--accent);outline-offset:2px}
-/* Nighttime darkens the stage itself, whatever the page theme. */
-.stage.night .mast{text-shadow:0 1px 10px #000a}
-.stage.night{--stage:#141519;--ink:#ece8e1;--muted:#9c968c;--panel:#23242a;--line:#3a3b42;color:var(--ink)}
-#loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);background:var(--stage);z-index:2}
-.hint{position:absolute;right:24px;bottom:28px;color:var(--muted);font-size:12px}
+#loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);background:var(--stage);z-index:2;font-weight:600}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.col{position:absolute;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:22px;z-index:1}
+.cats{left:7%;align-items:flex-start}
+.opts{right:7%;align-items:flex-end}
+.pill{padding:14px 30px;border-radius:999px;background:var(--pill);color:var(--navy);font-weight:900;font-size:20px;letter-spacing:.01em;white-space:nowrap;
+  transition:background-color .2s ease,color .2s ease,transform .15s ease}
+.pill:hover{background:var(--pill-hover)}
+.pill:active{transform:scale(.97)}
+.pill[aria-pressed="true"],.pill[aria-expanded="true"]{background:var(--navy);color:#fff}
+.opts .group{display:flex;flex-direction:column;align-items:flex-end;gap:22px}
+.opts .group[hidden]{display:none}
+.opts .group{animation:in .25s ease}
+@keyframes in{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
+/* On the night stage the idle pills go dark so they do not glare. */
+.stage.night .pill{background:#232a55;color:#e8ecff}
+.stage.night .pill[aria-pressed="true"],.stage.night .pill[aria-expanded="true"]{background:#fff;color:var(--navy)}
+
 @media (max-width:820px){
-  .stage{min-height:420px}
-    .mast{left:16px;right:16px;top:16px}.mast .code{display:none}
-  .tools{left:16px;bottom:16px;max-width:calc(100% - 32px);gap:6px}.hint{display:none}
+  .app{padding:10px}
+  .stage{border-radius:28px}
+  .col{top:auto;bottom:18px;transform:none;gap:10px}
+  .cats{left:16px}.opts{right:16px}
+  .opts .group{gap:10px}
+  .pill{padding:10px 18px;font-size:15px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -59,19 +58,28 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 <body>
 <div class="app">
   <section class="stage" aria-label="3D model of the Loomi pod">
+    <h1 class="sr-only">Loomi pod viewer</h1>
     <div id="viewport"><div id="loading">Loading the pod…</div></div>
-    <div class="mast">
-      <div><h1>Loomi</h1><p>The LUM-9000 pod, finished to the Visualization Guide.</p></div>
-      <div class="code">LUM-9000-WIP-260930<br>Guide · 10/02/2026</div>
+    <nav class="col cats" aria-label="Viewer settings">
+      <button class="pill" data-cat="camera" aria-expanded="true" aria-controls="opt-camera">Camera</button>
+      <button class="pill" data-cat="lighting" aria-expanded="false" aria-controls="opt-lighting">Lighting</button>
+      <button class="pill" data-cat="ambient" aria-expanded="false" aria-controls="opt-ambient">Ambient Mode</button>
+    </nav>
+    <div class="col opts">
+      <div class="group" id="opt-camera" role="group" aria-label="Camera angle">
+        <button class="pill" data-view="three" aria-pressed="true">3/4</button>
+        <button class="pill" data-view="straight" aria-pressed="false">Straight on</button>
+        <button class="pill" data-view="interior" aria-pressed="false">Interior</button>
+      </div>
+      <div class="group" id="opt-lighting" role="group" aria-label="Lighting" hidden>
+        <button class="pill" data-light="day" aria-pressed="true">Daytime</button>
+        <button class="pill" data-light="night" aria-pressed="false">Nighttime</button>
+      </div>
+      <div class="group" id="opt-ambient" role="group" aria-label="Ambient mode" hidden>
+        <button class="pill" data-ambient="on" aria-pressed="true">On</button>
+        <button class="pill" data-ambient="off" aria-pressed="false">Off</button>
+      </div>
     </div>
-    <div class="tools">
-      <div class="seg" role="group" aria-label="Camera angle"><span class="code">Camera</span>
-        <button data-view="three" aria-pressed="true">3/4</button><button data-view="straight" aria-pressed="false">Straight on</button><button data-view="interior" aria-pressed="false">Interior</button></div>
-      <div class="seg" role="group" aria-label="Lighting"><span class="code">Lighting</span>
-        <button data-light="day" aria-pressed="true">Daytime</button><button data-light="night" aria-pressed="false">Nighttime</button></div>
-      <label class="toggle" for="ambient"><span class="code">Ambient mode</span><input id="ambient" type="checkbox" role="switch" checked><i aria-hidden="true"></i><span id="ambient-state">On</span></label>
-    </div>
-    <div class="hint">Drag to orbit · scroll to zoom</div>
   </section>
 </div>
 <script type="module" src="app.js"></script>
