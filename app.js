@@ -11,7 +11,7 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 1, .01, 100);
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+let pixelRatio = Math.min(devicePixelRatio, 1.5); renderer.setPixelRatio(pixelRatio);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false; // the pod is static, so shadows are baked once after load
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
@@ -42,7 +42,7 @@ new MutationObserver(applyTheme).observe(document.documentElement, { attributes:
 
 // ---------- Materials ----------
 const loader = new THREE.TextureLoader(), aniso = renderer.capabilities.getMaxAnisotropy();
-function tex(path, srgb) { const t = loader.load(path); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; }
+function tex(path, srgb) { const t = loader.load(path, () => { needsRender = true; }); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; if (srgb) t.colorSpace = THREE.SRGBColorSpace; return t; }
 function canvasTex(draw, size) {
   const c = document.createElement('canvas'); c.width = c.height = 512; draw(c.getContext('2d'));
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -54,24 +54,13 @@ const maple = canvasTex(x => { const r = rng(3); x.fillStyle = '#e8cfa6'; x.fill
     for (let k = 0; k <= 512; k += 8) { const yy = y + 4 * Math.sin(k * .012 + y * .03); k ? x.lineTo(k, yy) : x.moveTo(k, yy); } x.stroke(); } }, [.6, .6]);
 const cork = canvasTex(x => { const r = rng(9); x.fillStyle = '#b48a5e'; x.fillRect(0, 0, 512, 512);
   for (let i = 0; i < 9000; i++) { x.fillStyle = `rgba(${r() > .5 ? '90,58,32' : '222,186,140'},${.15 + r() * .35})`; x.beginPath(); x.arc(r() * 512, r() * 512, .6 + r() * 2.2, 0, 7); x.fill(); } }, [.25, .25]);
-// Normal map derived from a scan's luminance, for textiles supplied as a colour image only.
-function derivedNormal(path, strength) {
-  const t = new THREE.Texture(); t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = aniso;
-  const img = new Image(); img.onload = () => {
-    const w = img.width, h = img.height, c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.drawImage(img, 0, 0);
-    const src = x.getImageData(0, 0, w, h).data, out = x.createImageData(w, h), L = (i, j) => src[(((j + h) % h) * w + ((i + w) % w)) * 4 + 1] / 255;
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-      const dx = (L(i + 1, j) - L(i - 1, j)) * strength, dy = (L(i, j + 1) - L(i, j - 1)) * strength, n = 1 / Math.hypot(dx, dy, 1), k = (j * w + i) * 4;
-      out.data[k] = (-dx * n * .5 + .5) * 255; out.data[k + 1] = (dy * n * .5 + .5) * 255; out.data[k + 2] = (n * .5 + .5) * 255; out.data[k + 3] = 255;
-    }
-    x.putImageData(out, 0, 0); t.image = c; t.needsUpdate = true;
-  }; img.src = path; return t;
-}
 // Updated textile scans (mirrored repeat hides tile seams on scans that are not tileable).
-function scan(path, size, strength, tint) { const d = tex(path, 1); d.wrapS = d.wrapT = THREE.MirroredRepeatWrapping; return { d, n: derivedNormal(path, strength), size, url: path, tint }; }
+// Normal maps for these scans are baked from their luminance offline (tex/*_normal.jpg).
+function scan(path, size, tint) { const mirror = t => { t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; return t; };
+  return { d: mirror(tex(path + '.jpg', 1)), n: mirror(tex(path + '_normal.jpg')), size, url: path + '.jpg', tint }; }
 const T = {
-  ochre: scan('tex/ochre_linen.jpg', [.2, .2], 3, '#c8c2b8'),
-  grey: scan('tex/grey_linen.jpg', [.14, .14], 3, '#cfcfcf'),
+  ochre: scan('tex/ochre_linen', [.2, .2], '#c8c2b8'),
+  grey: scan('tex/grey_linen', [.14, .14], '#cfcfcf'),
   remix: { d: tex('tex/remix_diffuse.jpg', 1), n: tex('tex/remix_normal.jpg'), r: tex('tex/remix_roughness.jpg'), size: [.3923, .4263], url: 'tex/remix_diffuse.jpg' },
   divina173: { d: tex('tex/divina173.jpg', 1), size: [.18, .254], url: 'tex/divina173.jpg' },
   maple, cork,
@@ -88,7 +77,7 @@ function textile(t, o = {}) {
     s.fragmentShader = `varying vec3 vTriP; varying vec3 vTriN;
 uniform sampler2D tD; uniform sampler2D tN; uniform sampler2D tR; uniform vec2 uSize; uniform float uNormal, uPleat, uOut, uRough;
 vec3 triW(vec3 n){ vec3 w=pow(abs(n),vec3(4.)); return w/(w.x+w.y+w.z); }
-vec4 tri(sampler2D t, vec3 p, vec3 w){ return texture2D(t,p.zy/uSize)*w.x + texture2D(t,p.xz/uSize)*w.y + texture2D(t,p.xy/uSize)*w.z; }
+vec4 tri(sampler2D t, vec3 p, vec3 w){ vec4 r=vec4(0.); if(w.x>.02) r+=texture2D(t,p.zy/uSize)*w.x; if(w.y>.02) r+=texture2D(t,p.xz/uSize)*w.y; if(w.z>.02) r+=texture2D(t,p.xy/uSize)*w.z; return r/max(w.x*step(.02,w.x)+w.y*step(.02,w.y)+w.z*step(.02,w.z),1e-4); }
 // Exterior pleats: 18 soft vertical grooves around the shell.
 float pleat(vec3 p){ float f=abs(fract(atan(p.z,p.x)*18./6.2832)-.5)*2.; return smoothstep(.0,.05,f); }
 ` + s.fragmentShader
@@ -177,7 +166,7 @@ new GLTFLoader().load('assets/loomi.glb', g => {
   // Warm light from the ceiling mesh and a glow on the backboard, kept well inside the shell.
   ceil.position.set(0, 1.05, 0); glow.position.set(.22, .9, 0); pod.add(ceil, glow);
   pod.updateMatrixWorld(true); renderer.shadowMap.needsUpdate = true;
-  $('#loading').remove(); window.__podReady = true;
+  $('#loading').remove(); needsRender = true; window.__podReady = true;
 }, undefined, e => { $('#loading').textContent = 'The model could not load. Refresh the page to try again.'; console.error(e); });
 
 function screenTexture() {
@@ -202,7 +191,7 @@ const VIEWS = {
   rear: { pos: [-2.4, 1.5, -3.4], target: [0, .7, 0] },
   top: { pos: [1.2, 3.2, 2.2], target: [0, 1.1, 0] },
 };
-let tween = null, current = 'three';
+let tween = null, current = 'three', needsRender = true;
 function fitFov() { camera.fov = camera.aspect < .75 ? 50 : 30; camera.updateProjectionMatrix(); }
 function goTo(name, instant) {
   current = name; const v = VIEWS[name];
@@ -240,6 +229,7 @@ function setState(a, b, e) {
 }
 function applyLighting(instant) {
   const to = targetState();
+  needsRender = true;
   if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { fade = null; setState(to, to, 1); }
   else fade = { from: stateNow(), to, t0: performance.now(), dur: 500 };
   document.querySelectorAll('[data-light]').forEach(b => b.setAttribute('aria-pressed', b.dataset.light === lighting));
@@ -255,10 +245,11 @@ function select(key) {
   if (selected) BY_KEY[selected].mat.emissive?.set(selected === 'Mesh' ? '#ffe2b0' : '#000000');
   selected = key && key !== selected ? key : null;
   document.querySelectorAll('.part').forEach(b => b.setAttribute('aria-pressed', b.dataset.key === selected));
+  needsRender = true;
   if (selected) { pulseStart = performance.now(); goTo(BY_KEY[selected].view); }
 }
 
-function resize() { const w = viewport.clientWidth, h = viewport.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; fitFov(); }
+function resize() { const w = viewport.clientWidth, h = viewport.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; fitFov(); needsRender = true; }
 new ResizeObserver(resize).observe(viewport); resize(); goTo('three', true);
 
 $('#guide-open').onclick = () => $('#guide').showModal();
@@ -277,6 +268,16 @@ renderer.setAnimationLoop(now => {
     const m = BY_KEY[selected].mat, s = .5 - .5 * Math.cos((now - pulseStart) / 420);
     accent.set(css('--accent') || '#a8722f').multiplyScalar(.45 * s); m.emissive?.copy(accent);
   }
-  controls.update(); renderer.render(scene, camera);
+  const moved = controls.update();
+  // Draw only when something changed; a still pod costs nothing.
+  if (moved || tween || fade || selected || needsRender) { renderer.render(scene, camera); needsRender = false; watchFrame(now); }
+  else lastFrame = 0;
 });
+// If frames run slow, drop to 1× pixel ratio once; most of the cost is per-pixel shading.
+let lastFrame = 0, slow = 0;
+function watchFrame(now) {
+  if (lastFrame && pixelRatio > 1) { slow = now - lastFrame > 24 ? slow + 1 : Math.max(0, slow - 1);
+    if (slow > 20) { pixelRatio = 1; renderer.setPixelRatio(1); resize(); } }
+  lastFrame = now;
+}
 window.__studio = { scene, camera, controls, renderer, select, goTo, setLighting: l => { lighting = l; applyLighting(); }, setAmbient: a => { ambient = a; $('#ambient').checked = a; applyLighting(); } };
