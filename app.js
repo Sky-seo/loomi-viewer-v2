@@ -34,7 +34,7 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowM
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
 // Stage colour follows the page theme.
-function applyTheme() { scene.background = new THREE.Color(css('--stage') || '#eeece8'); }
+function applyTheme() { scene.background = new THREE.Color(getComputedStyle($('.stage')).getPropertyValue('--stage').trim() || '#eeece8'); }
 applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -142,6 +142,8 @@ for (const g of SPEC) {
 
 // ---------- Model ----------
 const pod = new THREE.Group(); scene.add(pod);
+// The pod's own ambient lighting: the glowing ceiling mesh plus a warm wash on the backboard.
+const ceil = new THREE.PointLight('#ffd9a0', 1.1, 1.6, 1.6), glow = new THREE.PointLight('#ffcf8a', .5, .55, 1.6);
 const meshesByKey = {};
 let model = null;
 new GLTFLoader().load('assets/loomi.glb', g => {
@@ -158,9 +160,7 @@ new GLTFLoader().load('assets/loomi.glb', g => {
   const scr = new THREE.Mesh(new THREE.PlaneGeometry(.405, .238), new THREE.MeshBasicMaterial({ map: screenTexture(), toneMapped: false }));
   scr.rotation.y = -Math.PI / 2; scr.position.set(.3432, .5645, 0); scr.name = 'Loomi screen'; pod.add(scr);
   // Warm light from the ceiling mesh and a glow on the backboard, kept well inside the shell.
-  const ceil = new THREE.PointLight('#ffd9a0', 1.1, 1.6, 1.6); ceil.position.set(0, 1.05, 0);
-  const glow = new THREE.PointLight('#ffcf8a', .5, .55, 1.6); glow.position.set(.22, .9, 0);
-  pod.add(ceil, glow);
+  ceil.position.set(0, 1.05, 0); glow.position.set(.22, .9, 0); pod.add(ceil, glow);
   pod.updateMatrixWorld(true); renderer.shadowMap.needsUpdate = true;
   $('#loading').remove(); window.__podReady = true;
 }, undefined, e => { $('#loading').textContent = 'The model could not load. Refresh the page to try again.'; console.error(e); });
@@ -177,6 +177,9 @@ function screenTexture() {
 
 // ---------- Views & selection ----------
 const VIEWS = {
+  three: { pos: [2.3, 1.6, 3.6], target: [0, .72, 0] },
+  straight: { pos: [0, .95, 4.3], target: [0, .72, 0] },
+  interior: { pos: [-.42, .86, 1.25], target: [.34, .62, -.02] },
   spec: { pos: [2.3, 1.6, 3.6], target: [0, .72, 0] },
   door: { pos: [-.42, .86, 1.25], target: [.34, .62, -.02] },
   display: { pos: [-.12, .9, .7], target: [.36, .68, 0] },
@@ -184,7 +187,7 @@ const VIEWS = {
   rear: { pos: [-2.4, 1.5, -3.4], target: [0, .7, 0] },
   top: { pos: [1.2, 3.2, 2.2], target: [0, 1.1, 0] },
 };
-let tween = null, current = 'spec';
+let tween = null, current = 'three';
 function fitFov() { camera.fov = camera.aspect < .75 ? 50 : 30; camera.updateProjectionMatrix(); }
 function goTo(name, instant) {
   current = name; const v = VIEWS[name];
@@ -196,17 +199,39 @@ function goTo(name, instant) {
 }
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { select(null); goTo(b.dataset.view); });
 
+// ---------- Lighting & ambient mode ----------
+const meshMat = BY_KEY.Mesh.mat;
+const LIGHT = {
+  day: { key: ['#fff8ee', 1.5], hemi: .7, env: .55, exposure: 1.05, shadow: .1, interior: 1 },
+  night: { key: ['#9fb2d6', .18], hemi: .07, env: .07, exposure: 1.15, shadow: .04, interior: 1.7 },
+};
+let lighting = 'day', ambient = true;
+function applyLighting() {
+  const L = LIGHT[lighting];
+  key.color.set(L.key[0]); key.intensity = L.key[1]; hemi.intensity = L.hemi; scene.environmentIntensity = L.env;
+  renderer.toneMappingExposure = L.exposure; ground.material.opacity = L.shadow;
+  const on = ambient ? L.interior : 0;
+  ceil.intensity = 1.1 * on; glow.intensity = .5 * on;
+  meshMat.emissiveIntensity = ambient ? (lighting === 'night' ? 1.1 : .35) : 0;
+  $('.stage').classList.toggle('night', lighting === 'night'); applyTheme();
+  document.querySelectorAll('[data-light]').forEach(b => b.setAttribute('aria-pressed', b.dataset.light === lighting));
+  $('#ambient-state').textContent = ambient ? 'On' : 'Off';
+}
+document.querySelectorAll('[data-light]').forEach(b => b.onclick = () => { lighting = b.dataset.light; applyLighting(); });
+$('#ambient').onchange = e => { ambient = e.target.checked; applyLighting(); };
+applyLighting();
+
 const accent = new THREE.Color();
 let selected = null, pulseStart = 0;
 function select(key) {
-  if (selected) BY_KEY[selected].mat.emissive?.set(BY_KEY[selected].key === 'Mesh' ? '#ffe2b0' : '#000000');
+  if (selected) BY_KEY[selected].mat.emissive?.set(selected === 'Mesh' ? '#ffe2b0' : '#000000');
   selected = key && key !== selected ? key : null;
   document.querySelectorAll('.part').forEach(b => b.setAttribute('aria-pressed', b.dataset.key === selected));
   if (selected) { pulseStart = performance.now(); goTo(BY_KEY[selected].view); }
 }
 
 function resize() { const w = viewport.clientWidth, h = viewport.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; fitFov(); }
-new ResizeObserver(resize).observe(viewport); resize(); goTo('spec', true);
+new ResizeObserver(resize).observe(viewport); resize(); goTo('three', true);
 
 $('#guide-open').onclick = () => $('#guide').showModal();
 $('#guide-close').onclick = () => $('#guide').close();
@@ -225,4 +250,4 @@ renderer.setAnimationLoop(now => {
   }
   controls.update(); renderer.render(scene, camera);
 });
-window.__studio = { scene, camera, controls, renderer, select, goTo };
+window.__studio = { scene, camera, controls, renderer, select, goTo, setLighting: l => { lighting = l; applyLighting(); }, setAmbient: a => { ambient = a; $('#ambient').checked = a; applyLighting(); } };
