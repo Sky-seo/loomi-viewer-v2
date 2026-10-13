@@ -34,7 +34,8 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowM
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
 // Stage colour follows the page theme.
-function applyTheme() { scene.background = new THREE.Color(getComputedStyle($('.stage')).getPropertyValue('--stage').trim() || '#eeece8'); }
+let lightingReady = false;
+function applyTheme() { if (lightingReady) applyLighting(true); else scene.background = new THREE.Color(getComputedStyle($('.stage')).getPropertyValue('--stage').trim() || '#eeece8'); }
 applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -53,17 +54,31 @@ const maple = canvasTex(x => { const r = rng(3); x.fillStyle = '#e8cfa6'; x.fill
     for (let k = 0; k <= 512; k += 8) { const yy = y + 4 * Math.sin(k * .012 + y * .03); k ? x.lineTo(k, yy) : x.moveTo(k, yy); } x.stroke(); } }, [.6, .6]);
 const cork = canvasTex(x => { const r = rng(9); x.fillStyle = '#b48a5e'; x.fillRect(0, 0, 512, 512);
   for (let i = 0; i < 9000; i++) { x.fillStyle = `rgba(${r() > .5 ? '90,58,32' : '222,186,140'},${.15 + r() * .35})`; x.beginPath(); x.arc(r() * 512, r() * 512, .6 + r() * 2.2, 0, 7); x.fill(); } }, [.25, .25]);
+// Normal map derived from a scan's luminance, for textiles supplied as a colour image only.
+function derivedNormal(path, strength) {
+  const t = new THREE.Texture(); t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping; t.anisotropy = aniso;
+  const img = new Image(); img.onload = () => {
+    const w = img.width, h = img.height, c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+    const src = x.getImageData(0, 0, w, h).data, out = x.createImageData(w, h), L = (i, j) => src[(((j + h) % h) * w + ((i + w) % w)) * 4 + 1] / 255;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const dx = (L(i + 1, j) - L(i - 1, j)) * strength, dy = (L(i, j + 1) - L(i, j - 1)) * strength, n = 1 / Math.hypot(dx, dy, 1), k = (j * w + i) * 4;
+      out.data[k] = (-dx * n * .5 + .5) * 255; out.data[k + 1] = (dy * n * .5 + .5) * 255; out.data[k + 2] = (n * .5 + .5) * 255; out.data[k + 3] = 255;
+    }
+    x.putImageData(out, 0, 0); t.image = c; t.needsUpdate = true;
+  }; img.src = path; return t;
+}
+// Updated textile scans (mirrored repeat hides tile seams on scans that are not tileable).
+function scan(path, size, strength, tint) { const d = tex(path, 1); d.wrapS = d.wrapT = THREE.MirroredRepeatWrapping; return { d, n: derivedNormal(path, strength), size, url: path, tint }; }
 const T = {
-  melange: { d: tex('tex/melange_diffuse.jpg', 1), n: tex('tex/melange_normal.jpg'), r: tex('tex/melange_roughness.jpg'), size: [.2776, .3945], url: 'tex/melange_diffuse.jpg' },
-  remix: { d: tex('tex/remix_diffuse.jpg', 1), n: tex('tex/remix_normal.jpg'), r: tex('tex/remix_roughness.jpg'), size: [.3923, .4263], url: 'tex/remix_diffuse.jpg' },
-  apparel: { d: tex('tex/apparel_diffuse.jpg', 1), n: tex('tex/apparel_normal.jpg'), r: tex('tex/apparel_roughness.jpg'), size: [.2776, .3945], url: 'tex/apparel_diffuse.jpg' },
+  ochre: scan('tex/ochre_linen.jpg', [.2, .2], 3, '#c8c2b8'),
+  grey: scan('tex/grey_linen.jpg', [.14, .14], 3, '#cfcfcf'),
+  peach: scan('tex/peach_weave.jpg', [.2, .185], 2.5, '#e6e2dc'),
   divina173: { d: tex('tex/divina173.jpg', 1), size: [.18, .254], url: 'tex/divina173.jpg' },
-  divinaMD433: { d: tex('tex/divinamd433.jpg', 1), size: [.18, .254], url: 'tex/divinamd433.jpg' },
   maple, cork,
 };
 
 function textile(t, o = {}) {
-  const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, side: THREE.DoubleSide, envMapIntensity: o.env ?? .6, emissive: '#000000' });
+  const m = new THREE.MeshStandardMaterial({ color: t.tint || '#ffffff', roughness: 1, metalness: 0, side: THREE.DoubleSide, envMapIntensity: o.env ?? .6, emissive: '#000000' });
   const u = { tD: { value: t.d }, tN: { value: t.n || null }, tR: { value: t.r || null }, uSize: { value: new THREE.Vector2(...t.size) },
     uNormal: { value: o.normal ?? 1 }, uPleat: { value: o.pleat ? 1 : 0 }, uOut: { value: o.outward ? 1 : 0 }, uRough: { value: o.rough ?? 1 } };
   m.onBeforeCompile = s => {
@@ -102,23 +117,23 @@ const satin = c => new THREE.MeshPhysicalMaterial({ color: c, roughness: .45, cl
 // The guide's callouts. `key` matches the material slot baked into loomi.glb; `view` is where the camera goes.
 const SPEC = [
   { group: 'Shell', items: [
-    { key: 'Exterior', name: 'Exterior wall', fabric: 'Divina Melange 3 (120), pleated', code: '1213_C0120 · 27.8 × 39.5 cm', sw: T.melange, mat: textile(T.melange, { pleat: true, normal: 1.2, outward: true }), view: 'spec' },
-    { key: 'Base', name: 'Base', fabric: 'Divina Melange 3 (120)', code: '1213_C0120', sw: T.melange, mat: textile(T.melange, { normal: 1.2, outward: true }), view: 'rear' },
+    { key: 'Exterior', name: 'Exterior wall', fabric: 'Divina Melange 3 (120), pleated', code: '1213_C0120 · updated scan', sw: T.grey, mat: textile(T.grey, { pleat: true, normal: 1, outward: true }), view: 'spec' },
+    { key: 'Base', name: 'Base', fabric: 'Divina Melange 3 (120)', code: '1213_C0120', sw: T.grey, mat: textile(T.grey, { normal: 1, outward: true }), view: 'rear' },
     { key: 'TopCap', name: 'Top cap', fabric: 'Satin plastic', code: 'Pantone 406 C', color: '#cfc7bf', mat: satin('#cfc7bf'), view: 'top' },
     { key: 'Mesh', name: 'Mesh', fabric: 'White mesh', code: 'Ceiling, lit from above', color: '#f6efe2', mat: new THREE.MeshStandardMaterial({ color: '#f6efe2', roughness: .9, emissive: '#ffe2b0', emissiveIntensity: .35, side: THREE.DoubleSide }), view: 'top' },
     { key: 'DoorFrame', name: 'Door frame', fabric: 'Satin plastic', code: 'Pantone 406 C', color: '#cfc7bf', mat: satin('#cfc7bf'), view: 'door' },
   ] },
   { group: 'Interior', items: [
-    { key: 'Interior', name: 'Interior wall', fabric: 'Remix 3 (406)', code: '2968_C0406 · 39.2 × 42.6 cm', sw: T.remix, mat: textile(T.remix, { normal: .8 }), view: 'door' },
-    { key: 'SeatBack', name: 'Seat back', fabric: 'Divina MD (433)', code: 'Scan supplied · size est. 18 × 25 cm', sw: T.divinaMD433, mat: textile(T.divinaMD433), view: 'seat' },
-    { key: 'SeatCushion', name: 'Seat cushion', fabric: 'Apparel (0423)', code: '13006_C0423 · 27.8 × 39.5 cm', sw: T.apparel, mat: textile(T.apparel, { normal: 1.6 }), view: 'seat' },
+    { key: 'Interior', name: 'Interior wall', fabric: 'Remix 3 (406)', code: '2968_C0406 · updated scan', sw: T.peach, mat: textile(T.peach, { normal: .8 }), view: 'door' },
+    { key: 'SeatBack', name: 'Seat back', fabric: 'Divina MD (433)', code: 'Updated scan', sw: T.ochre, mat: textile(T.ochre, { normal: 1 }), view: 'seat' },
+    { key: 'SeatCushion', name: 'Seat cushion', fabric: 'Apparel (0423)', code: '13006_C0423 · updated scan', sw: T.ochre, mat: textile(T.ochre, { normal: 1 }), view: 'seat' },
     { key: 'CushionInsert', name: 'Cushion insert', fabric: 'Divina (173)', code: 'Scan supplied · size est. 18 × 25 cm', sw: T.divina173, mat: textile(T.divina173), view: 'seat' },
     { key: 'Floor', name: 'Floor', fabric: 'Cork', code: 'Natural cork', sw: T.cork, mat: textile(T.cork, { rough: .9 }), view: 'seat' },
   ] },
   { group: 'Workstation', items: [
-    { key: 'Backboard', name: 'Backboard', fabric: 'Divina MD (433)', code: 'Scan supplied · size est. 18 × 25 cm', sw: T.divinaMD433, mat: textile(T.divinaMD433), view: 'display' },
+    { key: 'Backboard', name: 'Backboard', fabric: 'Divina MD (433)', code: 'Updated scan', sw: T.ochre, mat: textile(T.ochre, { normal: 1 }), view: 'display' },
     { key: 'Bezel', name: 'Monitor bezel', fabric: 'Satin plastic, matches backboard', code: 'Camera integrated', color: '#c99550', mat: satin('#c99550'), view: 'display' },
-    { key: 'SpeakerCover', name: 'Speaker cover', fabric: 'Soft acoustic fabric, matches exterior', code: '1213_C0120', sw: T.melange, mat: textile(T.melange), view: 'display' },
+    { key: 'SpeakerCover', name: 'Speaker cover', fabric: 'Soft acoustic fabric, matches exterior', code: '1213_C0120', sw: T.grey, mat: textile(T.grey), view: 'display' },
     { key: 'Desk', name: 'Desk', fabric: 'Maple wood', code: 'Half-round top on pedestal', sw: T.maple, mat: textile(T.maple, { rough: .55, env: 1 }), view: 'display' },
   ] },
 ];
@@ -206,20 +221,33 @@ const LIGHT = {
   night: { key: ['#9fb2d6', .18], hemi: .07, env: .07, exposure: 1.15, shadow: .04, interior: 1.7 },
 };
 let lighting = 'day', ambient = true;
-function applyLighting() {
-  const L = LIGHT[lighting];
-  key.color.set(L.key[0]); key.intensity = L.key[1]; hemi.intensity = L.hemi; scene.environmentIntensity = L.env;
-  renderer.toneMappingExposure = L.exposure; ground.material.opacity = L.shadow;
-  const on = ambient ? L.interior : 0;
-  ceil.intensity = 1.1 * on; glow.intensity = .5 * on;
-  meshMat.emissiveIntensity = ambient ? (lighting === 'night' ? 1.1 : .35) : 0;
-  $('.stage').classList.toggle('night', lighting === 'night'); applyTheme();
+// Lighting changes blend over ~1 s: every light, the exposure and the stage colour ease from where they are to the new state.
+const stateNow = () => ({ keyColor: key.color.clone(), key: key.intensity, hemi: hemi.intensity, env: scene.environmentIntensity, exposure: renderer.toneMappingExposure,
+  shadow: ground.material.opacity, ceil: ceil.intensity, glow: glow.intensity, mesh: meshMat.emissiveIntensity, bg: (scene.background || new THREE.Color()).clone() });
+let fade = null;
+function targetState() {
+  const L = LIGHT[lighting], on = ambient ? L.interior : 0;
+  $('.stage').classList.toggle('night', lighting === 'night');
+  return { keyColor: new THREE.Color(L.key[0]), key: L.key[1], hemi: L.hemi, env: L.env, exposure: L.exposure, shadow: L.shadow, ceil: 1.1 * on, glow: .5 * on,
+    mesh: ambient ? (lighting === 'night' ? 1.1 : .35) : 0, bg: new THREE.Color(getComputedStyle($('.stage')).getPropertyValue('--stage').trim() || '#eeece8') };
+}
+function setState(a, b, e) {
+  key.color.copy(a.keyColor).lerp(b.keyColor, e); scene.background = a.bg.clone().lerp(b.bg, e);
+  const m = (x, y) => x + (y - x) * e;
+  key.intensity = m(a.key, b.key); hemi.intensity = m(a.hemi, b.hemi); scene.environmentIntensity = m(a.env, b.env);
+  renderer.toneMappingExposure = m(a.exposure, b.exposure); ground.material.opacity = m(a.shadow, b.shadow);
+  ceil.intensity = m(a.ceil, b.ceil); glow.intensity = m(a.glow, b.glow); meshMat.emissiveIntensity = m(a.mesh, b.mesh);
+}
+function applyLighting(instant) {
+  const to = targetState();
+  if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) { fade = null; setState(to, to, 1); }
+  else fade = { from: stateNow(), to, t0: performance.now(), dur: 1000 };
   document.querySelectorAll('[data-light]').forEach(b => b.setAttribute('aria-pressed', b.dataset.light === lighting));
   $('#ambient-state').textContent = ambient ? 'On' : 'Off';
 }
 document.querySelectorAll('[data-light]').forEach(b => b.onclick = () => { lighting = b.dataset.light; applyLighting(); });
 $('#ambient').onchange = e => { ambient = e.target.checked; applyLighting(); };
-applyLighting();
+lightingReady = true; applyLighting(true);
 
 const accent = new THREE.Color();
 let selected = null, pulseStart = 0;
@@ -244,6 +272,7 @@ renderer.setAnimationLoop(now => {
     camera.position.lerpVectors(tween.from.p, tween.to.p, e); controls.target.lerpVectors(tween.from.t, tween.to.t, e);
     if (k === 1) tween = null;
   }
+  if (fade) { const k = Math.min(1, (now - fade.t0) / fade.dur); setState(fade.from, fade.to, k * k * (3 - 2 * k)); if (k === 1) fade = null; }
   if (selected) { // a slow warm pulse marks every surface that uses the selected material
     const m = BY_KEY[selected].mat, s = .5 - .5 * Math.cos((now - pulseStart) / 420);
     accent.set(css('--accent') || '#a8722f').multiplyScalar(.45 * s); m.emissive?.copy(accent);
